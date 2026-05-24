@@ -19,6 +19,7 @@ import VendorTwoPage from "./pages/VendorTwoPage";
 import VendorTwoDetailsPage from "./pages/VendorTwoDetailsPage";
 import BecomeSellerPage from "./pages/BecomeSellerPage";
 import WishlistPage from "./pages/WishlistPage";
+import AgentSearchPage from "./pages/AgentSearchPage";
 function App() {
   return (
     <BrowserRouter>
@@ -30,6 +31,7 @@ function App() {
         <Route exact path='/index-two' element={<HomePageTwo />} />
         <Route exact path='/index-three' element={<HomePageThree />} />
         <Route exact path='/shop' element={<ShopPage />} />
+        <Route exact path='/ai-search' element={<AgentSearchPage />} />
         <Route
           exact
           path='/product-details'

@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AgentSearchChat from './AgentSearchChat';
 import { OPEN_AGENT_ASSISTANT } from '../utils/openAgentAssistant';
 import '../styles/agent-assistant.scss';
+
+const FAB_OFFSET = 24;
 
 const OPEN_KEY = 'agent_assistant_open';
 const EXPANDED_KEY = 'agent_assistant_expanded';
@@ -17,6 +19,8 @@ const AgentAssistant = () => {
   const [isExpanded, setIsExpanded] = useState(
     () => sessionStorage.getItem(EXPANDED_KEY) === '1'
   );
+  const [fabBottom, setFabBottom] = useState(FAB_OFFSET);
+  const layerRef = useRef(null);
   const openPanel = useCallback(() => {
     setIsOpen(true);
     sessionStorage.setItem(OPEN_KEY, '1');
@@ -52,6 +56,26 @@ const AgentAssistant = () => {
     return () => window.removeEventListener(OPEN_AGENT_ASSISTANT, onOpen);
   }, [openPanel]);
 
+  /** Keep FAB above footers / mobile chrome while scrolling */
+  useEffect(() => {
+    const updateFabPosition = () => {
+      const vh = window.innerHeight;
+      const scrollY = window.scrollY;
+      const docH = document.documentElement.scrollHeight;
+      const nearBottom = scrollY + vh > docH - 120;
+      const extra = nearBottom ? Math.min(80, docH - (scrollY + vh) + 120) : 0;
+      setFabBottom(FAB_OFFSET + Math.max(0, extra));
+    };
+
+    updateFabPosition();
+    window.addEventListener('scroll', updateFabPosition, { passive: true });
+    window.addEventListener('resize', updateFabPosition);
+    return () => {
+      window.removeEventListener('scroll', updateFabPosition);
+      window.removeEventListener('resize', updateFabPosition);
+    };
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key === 'Escape' && isOpen) {
@@ -76,7 +100,11 @@ const AgentAssistant = () => {
   };
 
   return (
-    <>
+    <div
+      ref={layerRef}
+      className='agent-assistant-layer'
+      style={{ '--agent-fab-bottom': `${fabBottom}px` }}
+    >
       <div
         className={`agent-assistant-backdrop ${
           isOpen && isExpanded ? 'agent-assistant-backdrop--visible' : ''
@@ -112,7 +140,7 @@ const AgentAssistant = () => {
       <button
         type='button'
         className={`agent-assistant-fab ${
-          isOpen && !isExpanded ? 'agent-assistant-fab--hidden' : ''
+          isOpen && !isExpanded ? 'agent-assistant-fab--panel-open' : ''
         } ${isExpanded ? 'agent-assistant-fab--expanded-close' : ''}`}
         onClick={handleFabClick}
         aria-label={
@@ -122,7 +150,7 @@ const AgentAssistant = () => {
       >
         <i className={isOpen ? 'ph ph-x' : 'ph ph-sparkle'} />
       </button>
-    </>
+    </div>
   );
 };
 

@@ -7,6 +7,7 @@ import {
   searchAgent,
   sendFeedback
 } from '../services/agentApi';
+import ThemeToggle from './ThemeToggle';
 import '../styles/agent-assistant.scss';
 
 const SESSION_KEY = 'agent_search_session';
@@ -175,6 +176,7 @@ const AgentSearchChat = ({ isExpanded, onClose, onToggleExpand }) => {
             </p>
           </div>
           <div className='agent-chat-header-actions'>
+            <ThemeToggle className='agent-header-icon-btn theme-toggle--compact' />
             <Link
               to='/valkey-dashboard'
               className='agent-header-icon-btn text-decoration-none'

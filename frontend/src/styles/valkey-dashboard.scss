@@ -1,3 +1,20 @@
+.valkey-dashboard--themed {
+  background: var(--theme-bg, #f8fafc);
+  color: var(--theme-text, #111827);
+
+  h4,
+  h6,
+  p,
+  strong {
+    color: inherit;
+  }
+
+  .text-gray-500,
+  .text-gray-600 {
+    color: var(--theme-text-muted, #6b7280) !important;
+  }
+}
+
 .valkey-dashboard-header h4 {
   margin: 0;
 }
@@ -9,12 +26,13 @@
   padding: 8px 14px;
   border-radius: 999px;
   font-size: 13px;
-  background: #f3f4f6;
-  color: #6b7280;
+  background: var(--theme-surface-elevated, #f3f4f6);
+  color: var(--theme-text-muted, #6b7280);
+  border: 1px solid var(--theme-border, transparent);
 
   &--on {
-    background: #fff7ed;
-    color: #c2410c;
+    background: rgba(250, 100, 0, 0.15);
+    color: #fa6400;
   }
 }
 
@@ -47,20 +65,24 @@
 }
 
 .valkey-stat-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--theme-surface, #fff);
+  border: 1px solid var(--theme-border, #e5e7eb);
   border-radius: 12px;
   padding: 16px;
 
   &--accent {
     border-color: #fa6400;
-    background: linear-gradient(135deg, #fff7ed, #fff);
+    background: linear-gradient(
+      135deg,
+      rgba(250, 100, 0, 0.12),
+      var(--theme-surface, #fff)
+    );
   }
 }
 
 .valkey-stat-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--theme-text-muted, #6b7280);
   margin: 0 0 4px;
 }
 
@@ -68,7 +90,7 @@
   font-size: 24px;
   font-weight: 700;
   margin: 0;
-  color: #111827;
+  color: var(--theme-text, #111827);
 }
 
 .valkey-layout {
@@ -83,7 +105,7 @@
 }
 
 .valkey-panel {
-  background: #fff;
+  background: var(--theme-surface, #fff);
   border: 2px solid #fa6400;
   border-radius: 16px;
   padding: 20px;
@@ -116,7 +138,7 @@
     display: flex;
     justify-content: space-between;
     padding: 8px 0;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid var(--theme-border, #f3f4f6);
     font-size: 14px;
   }
 }
@@ -132,8 +154,8 @@
   li {
     margin: 0;
     padding: 14px 16px;
-    background: #fafafa;
-    border: 1px solid #f3f4f6;
+    background: var(--theme-bg, #fafafa);
+    border: 1px solid var(--theme-border, #f3f4f6);
     border-radius: 12px;
     min-width: 0;
 
@@ -170,7 +192,7 @@
   gap: 8px;
   align-items: center;
   padding: 10px 12px;
-  background: #fafafa;
+  background: var(--theme-bg, #fafafa);
   border-radius: 8px;
   font-size: 12px;
 

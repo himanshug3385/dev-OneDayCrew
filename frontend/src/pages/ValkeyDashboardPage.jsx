@@ -6,6 +6,7 @@ import Breadcrumb from '../components/Breadcrumb';
 import FooterTwo from '../components/FooterTwo';
 import ColorInit from '../helper/ColorInit';
 import ScrollToTop from 'react-scroll-to-top';
+import ThemeToggle from '../components/ThemeToggle';
 import { getValkeyDashboard, subscribeValkeyStream } from '../services/valkeyApi';
 import '../styles/valkey-dashboard.scss';
 
@@ -64,7 +65,7 @@ const ValkeyDashboardPage = () => {
       <HeaderTwo category={true} />
       <Breadcrumb title='Valkey Live Monitor' />
 
-      <section className='valkey-dashboard py-40'>
+      <section className='valkey-dashboard valkey-dashboard--themed py-40'>
         <div className='container container-lg'>
           <div className='valkey-dashboard-header flex-between flex-wrap gap-16 mb-32'>
             <div>
@@ -78,6 +79,7 @@ const ValkeyDashboardPage = () => {
               </p>
             </div>
             <div className='flex-align gap-12 flex-wrap'>
+              <ThemeToggle showLabel />
               <span
                 className={`valkey-live-pill ${
                   data?.connected ? 'valkey-live-pill--on' : ''

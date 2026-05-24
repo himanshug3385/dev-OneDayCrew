@@ -5,6 +5,30 @@ const valkeyService = require('./valkey');
  * Challenge 14 agent — NLU, multi-step tools, Valkey conversation memory.
  * Spec tools: search_products, filter_by_price, get_reviews, check_availability, get_similar
  */
+/** Catalog domains — mock store is science/STEM only; groceries are not stocked */
+const PRODUCT_DOMAINS = {
+  groceries: {
+    keywords: [
+      'vegetable', 'vegetables', 'veggie', 'veggies', 'fruit', 'fruits',
+      'grocery', 'groceries', 'produce', 'tomato', 'tomatoes', 'potato',
+      'potatoes', 'onion', 'carrot', 'spinach', 'lettuce', 'apple', 'banana',
+      'organic food', 'fresh food', 'dairy', 'milk', 'bread', 'rice', 'pulses'
+    ],
+    categories: ['grocery', 'groceries', 'produce', 'vegetables', 'fruits'],
+    tags: ['grocery', 'fresh', 'organic', 'vegetables', 'fruits', 'produce'],
+    catalogAvailable: false
+  },
+  science: {
+    keywords: [
+      'science', 'robot', 'robotics', 'telescope', 'astronomy', 'chemistry',
+      'experiment', 'stem', 'coding', 'educational', 'kit', 'kits'
+    ],
+    categories: ['science', 'stem'],
+    tags: ['science', 'educational', 'stem', 'robotics'],
+    catalogAvailable: true
+  }
+};
+
 class AgentService {
   constructor() {
     this.tools = {
@@ -98,12 +122,85 @@ class AgentService {
     else if (queryLower.includes('son')) params.context.recipient = 'son';
     else if (queryLower.includes('daughter')) params.context.recipient = 'daughter';
 
-    if (queryLower.includes('cheap') || queryLower.includes('affordable')) {
+    if (
+      queryLower.includes('cheap') ||
+      queryLower.includes('cheaper') ||
+      queryLower.includes('affordable') ||
+      queryLower.includes('budget')
+    ) {
       params.context.budgetPreference = 'low';
+    }
+
+    const domain = this.detectProductDomain(query);
+    if (domain) {
+      params.context.productDomain = domain;
+      const domainDef = PRODUCT_DOMAINS[domain];
+      if (domainDef) {
+        params.categories.push(
+          ...domainDef.categories.filter((c) => !params.categories.includes(c))
+        );
+        params.tags.push(
+          ...domainDef.tags.filter((t) => !params.tags.includes(t))
+        );
+        if (!domainDef.catalogAvailable) {
+          params.context.unavailableOnSite = true;
+        }
+      }
     }
 
     params.keywords = this.extractKeywordsFromUserInput(query, params);
     return params;
+  }
+
+  detectProductDomain(query) {
+    const q = query.toLowerCase();
+    for (const [domain, def] of Object.entries(PRODUCT_DOMAINS)) {
+      if (def.keywords.some((kw) => q.includes(kw))) return domain;
+    }
+    return null;
+  }
+
+  domainsConflict(currentDomain, previousDomain) {
+    if (!currentDomain || !previousDomain) return false;
+    return currentDomain !== previousDomain;
+  }
+
+  isTopicShift(currentParams, previousParams) {
+    const currentDomain =
+      currentParams.context?.productDomain ||
+      (currentParams.categories[0] ? 'science' : null);
+    const previousDomain =
+      previousParams?.context?.productDomain ||
+      (previousParams?.categories?.length ? 'science' : null);
+
+    if (currentParams.context?.productDomain && previousParams) {
+      if (
+        this.domainsConflict(
+          currentParams.context.productDomain,
+          previousParams.context?.productDomain || previousDomain
+        )
+      ) {
+        return true;
+      }
+    }
+
+    if (currentParams.context?.unavailableOnSite) return true;
+
+    const newCats = currentParams.categories.filter(
+      (c) => !previousParams?.categories?.includes(c)
+    );
+    const newTags = currentParams.tags.filter(
+      (t) => !previousParams?.tags?.includes(t)
+    );
+    if (
+      previousParams &&
+      (newCats.length > 0 || newTags.length > 0) &&
+      currentParams.context?.productDomain
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   defaultPriceRangeForAge(age) {
@@ -136,10 +233,13 @@ class AgentService {
     return '16+';
   }
 
-  /** Only true follow-ups — not "show me robotics" on a fresh search */
-  isRefinementQuery(query) {
+  /**
+   * Price-only follow-ups on the same product topic — not "cheaper vegetables"
+   * after a science gift search.
+   */
+  isRefinementQuery(query, currentParams = null, conversationContext = null) {
     const q = query.toLowerCase();
-    return (
+    const hasPriceSignal =
       q.includes('cheaper') ||
       q.includes('lower price') ||
       q.includes('budget option') ||
@@ -147,14 +247,42 @@ class AgentService {
       q.includes('premium') ||
       q.includes('instead') ||
       q.includes('filter by price') ||
-      q.includes('affordable options')
-    );
+      q.includes('affordable options');
+
+    if (!hasPriceSignal) return false;
+
+    const parsed = currentParams || this.parseQuery(query);
+    if (parsed.context?.productDomain && conversationContext?.lastSearchParams) {
+      if (this.isTopicShift(parsed, conversationContext.lastSearchParams)) {
+        return false;
+      }
+    }
+
+    const domainKeywords = Object.values(PRODUCT_DOMAINS).flatMap((d) => d.keywords);
+    const introducesNewProduct =
+      domainKeywords.some((kw) => q.includes(kw)) &&
+      !(
+        q.includes('cheaper') ||
+        q.includes('lower price') ||
+        q.includes('budget option') ||
+        q.includes('affordable options') ||
+        q.includes('more expensive') ||
+        q.includes('premium')
+      );
+
+    if (introducesNewProduct) return false;
+
+    return true;
   }
 
   applyRefinement(query, searchParams, conversationContext) {
     const q = query.toLowerCase();
     const previous = conversationContext?.lastSearchParams;
     if (!previous) return searchParams;
+
+    if (this.isTopicShift(searchParams, previous)) {
+      return searchParams;
+    }
 
     const merged = {
       ...previous,
@@ -244,11 +372,15 @@ class AgentService {
       return ['ask_clarification'];
     }
 
+    if (searchParams.context?.unavailableOnSite) {
+      return ['search_products'];
+    }
+
     const sequence = [];
     const useSemantic =
       query.split(/\s+/).length > 8 &&
       searchParams.categories.length === 0 &&
-      !this.isRefinementQuery(query);
+      !this.isRefinementQuery(query, searchParams, conversationContext);
 
     sequence.push(useSemantic ? 'semantic_search' : 'search_products');
 
@@ -302,12 +434,18 @@ class AgentService {
     let searchParams = this.parseQuery(query);
 
     if (conversationHistory.length > 0) {
-      searchParams = this.mergeContext(searchParams, conversationHistory);
+      const lastParams = conversationContext?.lastSearchParams;
+      if (!this.isTopicShift(searchParams, lastParams)) {
+        searchParams = this.mergeContext(searchParams, conversationHistory);
+      } else {
+        console.log(`🔄 New topic detected — not merging previous search context`);
+      }
     }
 
     if (
-      this.isRefinementQuery(query) &&
-      (conversationContext?.lastSearchParams || conversationHistory.length > 0)
+      this.isRefinementQuery(query, searchParams, conversationContext) &&
+      conversationContext?.lastSearchParams &&
+      !this.isTopicShift(searchParams, conversationContext.lastSearchParams)
     ) {
       searchParams = this.applyRefinement(query, searchParams, conversationContext);
       console.log(`🔗 Refinement applied from previous Valkey context`);
@@ -394,6 +532,8 @@ class AgentService {
       products = [...products].sort((a, b) => a.price - b.price);
     }
 
+    products = this.filterRelevantProducts(products, searchParams, query);
+
     return {
       searchParams,
       products,
@@ -417,8 +557,44 @@ class AgentService {
     }));
   }
 
+  filterRelevantProducts(products, searchParams, query) {
+    if (!products?.length) return [];
+
+    const domain = searchParams.context?.productDomain;
+    if (domain === 'groceries' || searchParams.context?.unavailableOnSite) {
+      return [];
+    }
+
+    if (domain === 'science') {
+      return products.filter(
+        (p) =>
+          p.category === 'science' ||
+          p.category === 'stem' ||
+          p.tags?.some((t) =>
+            ['science', 'educational', 'stem', 'robotics', 'astronomy', 'chemistry'].includes(t)
+          )
+      );
+    }
+
+    const q = query.toLowerCase();
+    const domainKeywords = Object.values(PRODUCT_DOMAINS)
+      .flatMap((d) => d.keywords)
+      .filter((kw) => q.includes(kw));
+
+    if (domainKeywords.length === 0) return products;
+
+    const matched = products.filter((p) => {
+      const text =
+        `${p.name} ${p.description} ${p.category} ${(p.tags || []).join(' ')}`.toLowerCase();
+      return domainKeywords.some((kw) => text.includes(kw));
+    });
+
+    return matched.length > 0 ? matched : [];
+  }
+
   async searchProducts(params, naturalLanguageQuery = '') {
-    const isRefinement = params.context?.refinement;
+    const isRefinement =
+      params.context?.refinement && !params.context?.productDomain;
     const searchText = isRefinement
       ? ''
       : naturalLanguageQuery.trim() || params.keywords.join(' ') || '';
@@ -586,15 +762,16 @@ class AgentService {
     }
 
     if (!products?.length) {
+      const unavailableMsg = this.buildUnavailableMessage(query, searchParams);
       return {
-        response: `I couldn't find products matching "${query}". Could you share a budget or specific interests?`,
+        response: unavailableMsg.response,
         results: [],
-        followUp:
-          'For example: chemistry kits, astronomy, or robotics — and a price range?',
+        followUp: unavailableMsg.followUp,
         context: {
           intent: searchParams.intent,
           refinements_available: false,
-          toolsUsed
+          toolsUsed,
+          productDomain: searchParams.context?.productDomain
         }
       };
     }
@@ -623,9 +800,30 @@ class AgentService {
     };
   }
 
+  buildUnavailableMessage(query, searchParams) {
+    const domain = searchParams.context?.productDomain;
+    if (domain === 'groceries' || searchParams.context?.unavailableOnSite) {
+      return {
+        response:
+          "Thanks for asking! We don't currently carry fresh vegetables or grocery items on this site. Our catalog focuses on educational science and STEM kits for kids. I'd be happy to help you find a science gift or learning kit instead.",
+        followUp:
+          'Try: "Science kits for a 10-year-old" or "Robotics under ₹5000".'
+      };
+    }
+    return {
+      response: `I couldn't find products matching "${query}" on our site. Could you try a different category or share a budget?`,
+      followUp:
+        'For example: chemistry kits, astronomy, or robotics — and a price range?'
+    };
+  }
+
   buildResponseText(query, results, searchParams) {
     if (searchParams.context?.refinement === 'price_lower') {
-      return `Here are cheaper options (under ₹${searchParams.maxPrice}) from your previous science gift search:`;
+      const topic =
+        searchParams.categories?.length > 0
+          ? searchParams.categories.join(' ')
+          : 'your previous';
+      return `Here are cheaper options (under ₹${searchParams.maxPrice}) from ${topic} search:`;
     }
     if (searchParams.context?.occasion === 'birthday') {
       const agePart = searchParams.context.ageGroup
@@ -663,6 +861,10 @@ class AgentService {
       .find((t) => t.role === 'agent' && t.searchParams);
 
     if (!lastAgentTurn) return currentParams;
+
+    if (this.isTopicShift(currentParams, lastAgentTurn.searchParams)) {
+      return currentParams;
+    }
 
     return {
       ...lastAgentTurn.searchParams,

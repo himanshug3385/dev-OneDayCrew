@@ -115,11 +115,8 @@ class ValkeyService {
     }
   }
 
-  // Search products from a hypothetical index
-  async searchProducts(query, filters = {}) {
-    // This would integrate with Valkey Search
-    // For now, returning mock data
-    const mockProducts = [
+  getMockProducts() {
+    return [
       {
         id: 'product:0192d4e6-2c4e-7a6b-8d8f-0a1b2c3d4e5f',
         name: 'National Geographic Science Kit',
@@ -171,29 +168,68 @@ class ValkeyService {
         description: 'Grow beautiful crystals at home'
       }
     ];
+  }
 
-    // Apply filters
-    let results = mockProducts;
-    
-    if (filters.minPrice) {
-      results = results.filter(p => p.price >= filters.minPrice);
-    }
-    if (filters.maxPrice) {
-      results = results.filter(p => p.price <= filters.maxPrice);
-    }
-    if (filters.minRating) {
-      results = results.filter(p => p.rating >= filters.minRating);
-    }
-    if (filters.categories && filters.categories.length > 0) {
-      results = results.filter(p => filters.categories.includes(p.category));
-    }
-    if (filters.tags && filters.tags.length > 0) {
-      results = results.filter(p => 
-        filters.tags.some(tag => p.tags.includes(tag))
+  // Full-text + structured filter search (FT.SEARCH integration point)
+  async searchProducts(query, filters = {}) {
+    let results = [...this.getMockProducts()];
+
+    const q = (query || '').toLowerCase().trim();
+    if (q) {
+      results = results.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.description.toLowerCase().includes(q) ||
+          p.tags.some((t) => t.includes(q)) ||
+          p.category.includes(q)
       );
     }
 
-    return results;
+    if (filters.minPrice != null) {
+      results = results.filter((p) => p.price >= filters.minPrice);
+    }
+    if (filters.maxPrice != null) {
+      results = results.filter((p) => p.price <= filters.maxPrice);
+    }
+    if (filters.minRating != null) {
+      results = results.filter((p) => p.rating >= filters.minRating);
+    }
+    if (filters.categories?.length > 0) {
+      results = results.filter((p) =>
+        filters.categories.some(
+          (c) => p.category === c || p.tags.includes(c)
+        )
+      );
+    }
+    if (filters.tags?.length > 0) {
+      results = results.filter((p) =>
+        filters.tags.some(
+          (tag) =>
+            p.tags.includes(tag) ||
+            p.category === tag ||
+            p.name.toLowerCase().includes(tag)
+        )
+      );
+    }
+
+    return results.sort((a, b) => b.rating - a.rating);
+  }
+
+  // Vector / semantic similarity (idx:intent_vectors KNN integration point)
+  async semanticSearch(naturalLanguageQuery, limit = 10) {
+    const q = naturalLanguageQuery.toLowerCase();
+    const scored = this.getMockProducts().map((p) => {
+      const text = `${p.name} ${p.description} ${p.tags.join(' ')}`.toLowerCase();
+      const tokens = q.split(/\s+/).filter((t) => t.length > 2);
+      const hits = tokens.filter((t) => text.includes(t)).length;
+      return { product: p, score: hits / Math.max(tokens.length, 1) };
+    });
+
+    return scored
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((s) => s.product);
   }
 
   async getProductDetails(productId) {

@@ -30,12 +30,22 @@ VALKEY_URL=redis://localhost:6379
 ## Run
 
 ```bash
-# Terminal 1 – API server
+# Terminal 1 – API server (backend/)
 npm start
 
-# Terminal 2 – smoke tests
+# Terminal 2 – React UI (frontend/)
+npm start
+# Open http://localhost:3000/ai-search
+
+# Terminal 3 – smoke tests (backend/)
 npm run test:agent
 ```
+
+### UI
+
+- Route: **http://localhost:3000/ai-search**
+- Nav: **Shop → AI Search** or top menu **AI Search**
+- Chat supports sample prompts, multi-turn refinement, and thumbs up/down feedback
 
 ## API
 

@@ -117,39 +117,28 @@ const ValkeyDashboardPage = () => {
             />
           </div>
 
-          <div className='row g-24'>
+          <div className='row g-24 valkey-layout'>
             <div className='col-lg-4'>
-              <div className='valkey-panel'>
-                <h6 className='mb-16'>Keys in Valkey</h6>
-                <ul className='valkey-key-list'>
-                  {Object.entries(keyCounts).map(([k, v]) => (
-                    <li key={k}>
-                      <span>{k}</span>
-                      <strong>{v}</strong>
-                    </li>
-                  ))}
-                </ul>
-                {data?.serverInfo && (
-                  <div className='mt-20 pt-16 border-top'>
-                    <p className='text-xs text-gray-500 mb-4'>Memory</p>
-                    <p className='text-sm mb-0'>
-                      Used: {data.serverInfo.usedMemoryHuman}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className='valkey-panel mt-24'>
-                <h6 className='mb-12'>Key patterns (Challenge 14)</h6>
-                <ul className='valkey-pattern-list text-sm'>
-                  {data?.keyPatterns &&
-                    Object.entries(data.keyPatterns).map(([k, v]) => (
+              <div className='valkey-sidebar'>
+                <div className='valkey-panel valkey-panel--keys'>
+                  <h6 className='mb-16'>Keys in Valkey</h6>
+                  <ul className='valkey-key-list'>
+                    {Object.entries(keyCounts).map(([k, v]) => (
                       <li key={k}>
-                        <code>{k}</code>
-                        <span>{v}</span>
+                        <span>{k}</span>
+                        <strong>{v}</strong>
                       </li>
                     ))}
-                </ul>
+                  </ul>
+                  {data?.serverInfo && (
+                    <div className='mt-20 pt-16 border-top'>
+                      <p className='text-xs text-gray-500 mb-4'>Memory</p>
+                      <p className='text-sm mb-0'>
+                        Used: {data.serverInfo.usedMemoryHuman}
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -161,7 +150,7 @@ const ValkeyDashboardPage = () => {
                   CONVERSATION_SET. Open the assistant and send a query to see
                   new rows appear here.
                 </p>
-                <div className='valkey-event-log'>
+                <div className='valkey-event-log flex-grow-1'>
                   {events.length === 0 && (
                     <p className='text-sm text-gray-500 text-center py-24'>
                       No events yet. Send a message in the AI assistant.
@@ -179,7 +168,9 @@ const ValkeyDashboardPage = () => {
                       >
                         {EVENT_LABELS[ev.type] || ev.type}
                       </span>
-                      <span className='valkey-event-key'>{ev.key}</span>
+                      <span className='valkey-event-key' title={ev.key}>
+                        {ev.key}
+                      </span>
                       {ev.ms != null && (
                         <span className='valkey-event-ms'>{ev.ms}ms</span>
                       )}
@@ -195,8 +186,27 @@ const ValkeyDashboardPage = () => {
             </div>
           </div>
 
+          <div className='valkey-patterns-section'>
+            <div className='valkey-panel valkey-panel--patterns'>
+              <h6 className='mb-12'>Key patterns (Challenge 14)</h6>
+              <p className='text-xs text-gray-500 mb-16'>
+                Valkey data structures used by the agentic search pipeline.
+              </p>
+              <ul className='valkey-pattern-list text-sm'>
+                {data?.keyPatterns &&
+                  Object.entries(data.keyPatterns).map(([k, v]) => (
+                    <li key={k}>
+                      <code>{k}</code>
+                      <span>{v}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </div>
+
           <p className='text-xs text-gray-500 mt-24 mb-0'>
-            Updated: {data?.updatedAt ? new Date(data.updatedAt).toLocaleString() : '—'}
+            Updated:{' '}
+            {data?.updatedAt ? new Date(data.updatedAt).toLocaleString() : '—'}
           </p>
         </div>
       </section>

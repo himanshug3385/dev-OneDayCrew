@@ -264,12 +264,46 @@ body.agent-assistant-expanded {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
-  padding: 12px 14px;
-  transition: border-color 0.2s;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
 
   &:hover {
     border-color: var(--main-600, #fa6400);
+    box-shadow: 0 4px 12px rgba(250, 100, 0, 0.12);
   }
+}
+
+.agent-product-card__link {
+  display: block;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+
+  &:hover {
+    color: inherit;
+
+    .agent-product-card__cta {
+      color: var(--main-600, #fa6400);
+    }
+  }
+}
+
+.agent-product-card__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-top: 8px;
+  transition: color 0.15s;
+}
+
+.agent-product-card__feedback {
+  padding: 0 14px 10px;
+  border-top: 1px solid #f3f4f6;
+  padding-top: 8px;
 }
 
 .agent-product-reason {

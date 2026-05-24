@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { getAgentProductLink } from '../utils/productNavigation';
 import {
   checkHealth,
   getConversation,
@@ -300,51 +301,66 @@ const AgentSearchChat = ({ isExpanded, onClose, onToggleExpand }) => {
               <div className='agent-product-grid'>
                 {msg.results.map((product) => (
                   <div key={product.productId} className='agent-product-card'>
-                    <div className='flex-between flex-wrap gap-6'>
-                      <strong className='text-gray-900 text-sm'>
-                        {product.name}
-                      </strong>
-                      <span className='text-main-600 fw-semibold text-sm'>
-                        {formatPrice(product.price)}
-                      </span>
-                    </div>
-                    {product.rating != null && (
-                      <div className='text-xs text-warning-600 mt-4'>
-                        <i className='ph ph-star-fill' /> {product.rating}/5
+                    <Link
+                      to={getAgentProductLink(product)}
+                      className='agent-product-card__link'
+                      onClick={() => onClose?.()}
+                    >
+                      <div className='flex-between flex-wrap gap-6'>
+                        <strong className='text-gray-900 text-sm'>
+                          {product.name}
+                        </strong>
+                        <span className='text-main-600 fw-semibold text-sm'>
+                          {formatPrice(product.price)}
+                        </span>
                       </div>
-                    )}
-                    {product.reason && (
-                      <p className='agent-product-reason mb-0'>
-                        {product.reason}
-                      </p>
-                    )}
-                    <div className='agent-feedback-btns'>
-                      <button
-                        type='button'
-                        className={`agent-feedback-btn ${
-                          feedbackMap[product.productId] === 'helpful'
-                            ? 'agent-feedback-btn--active'
-                            : ''
-                        }`}
-                        onClick={() =>
-                          handleFeedback(product.productId, 'helpful')
-                        }
-                      >
-                        <i className='ph ph-thumbs-up' />
-                      </button>
-                      <button
-                        type='button'
-                        className={`agent-feedback-btn ${
-                          feedbackMap[product.productId] === 'not_helpful'
-                            ? 'agent-feedback-btn--active'
-                            : ''
-                        }`}
-                        onClick={() =>
-                          handleFeedback(product.productId, 'not_helpful')
-                        }
-                      >
-                        <i className='ph ph-thumbs-down' />
-                      </button>
+                      {product.rating != null && (
+                        <div className='text-xs text-warning-600 mt-4'>
+                          <i className='ph ph-star-fill' /> {product.rating}/5
+                        </div>
+                      )}
+                      {product.reason && (
+                        <p className='agent-product-reason mb-0'>
+                          {product.reason}
+                        </p>
+                      )}
+                      <span className='agent-product-card__cta'>
+                        View product <i className='ph ph-arrow-right' />
+                      </span>
+                    </Link>
+                    <div className='agent-product-card__feedback'>
+                      <div className='agent-feedback-btns'>
+                        <button
+                          type='button'
+                          className={`agent-feedback-btn ${
+                            feedbackMap[product.productId] === 'helpful'
+                              ? 'agent-feedback-btn--active'
+                              : ''
+                          }`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleFeedback(product.productId, 'helpful');
+                          }}
+                        >
+                          <i className='ph ph-thumbs-up' />
+                        </button>
+                        <button
+                          type='button'
+                          className={`agent-feedback-btn ${
+                            feedbackMap[product.productId] === 'not_helpful'
+                              ? 'agent-feedback-btn--active'
+                              : ''
+                          }`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleFeedback(product.productId, 'not_helpful');
+                          }}
+                        >
+                          <i className='ph ph-thumbs-down' />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}

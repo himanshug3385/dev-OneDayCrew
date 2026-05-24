@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const valkeyService = require('./services/valkey');
 const agentRoutes = require('./routes/agent');
+const valkeyRoutes = require('./routes/valkey');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -22,6 +23,7 @@ valkeyService.connect().then(() => {
 
 // Routes
 app.use('/api/agent', agentRoutes);
+app.use('/api/valkey', valkeyRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -39,7 +41,7 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📡 Valkey: ${process.env.VALKEY_URL || 'localhost:6379'}`);
+  console.log(`📡 Valkey: ${process.env.VALKEY_URL || 'valkey://localhost:6379'}`);
 });
 
 module.exports = app;

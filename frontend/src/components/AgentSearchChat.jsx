@@ -1,21 +1,20 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   checkHealth,
   getConversation,
   searchAgent,
   sendFeedback
 } from '../services/agentApi';
-import '../styles/agent-search.scss';
+import '../styles/agent-assistant.scss';
 
 const SESSION_KEY = 'agent_search_session';
 const USER_KEY = 'agent_search_user';
 
-const QUICK_PROMPTS = [
+/** Challenge 14 document examples — optional hints only, not the primary input path */
+const CHALLENGE_EXAMPLES = [
   'I need a birthday gift for my 10-year-old nephew who likes science',
-  'Show me robotics kits under $50',
-  "What's a good telescope for a beginner astronomer?",
-  'Show me cheaper options',
-  'Chemistry sets for kids, highly rated only'
+  'Show me cheaper options'
 ];
 
 function formatPrice(price) {
@@ -23,7 +22,7 @@ function formatPrice(price) {
   return `₹${Number(price).toLocaleString('en-IN')}`;
 }
 
-const AgentSearchChat = () => {
+const AgentSearchChat = ({ isExpanded, onClose, onToggleExpand }) => {
   const [sessionId, setSessionId] = useState(
     () => sessionStorage.getItem(SESSION_KEY) || null
   );
@@ -36,7 +35,9 @@ const AgentSearchChat = () => {
   const [error, setError] = useState(null);
   const [backendOnline, setBackendOnline] = useState(null);
   const [feedbackMap, setFeedbackMap] = useState({});
+  const [showExamples, setShowExamples] = useState(false);
   const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,6 +53,11 @@ const AgentSearchChat = () => {
       .catch(() => setBackendOnline(false));
   }, []);
 
+  useEffect(() => {
+    const t = setTimeout(() => inputRef.current?.focus(), 200);
+    return () => clearTimeout(t);
+  }, [isExpanded]);
+
   const loadStoredSession = useCallback(async () => {
     const stored = sessionStorage.getItem(SESSION_KEY);
     if (!stored) return;
@@ -66,8 +72,9 @@ const AgentSearchChat = () => {
           restored.push({
             role: 'agent',
             content: turn.content,
-            results: (turn.results || []).map((id) => ({ productId: id })),
-            followUp: null
+            results: [],
+            followUp: null,
+            meta: { resultSource: 'live_search' }
           });
         }
       }
@@ -96,7 +103,8 @@ const AgentSearchChat = () => {
       const data = await searchAgent({
         sessionId,
         userId,
-        message: trimmed
+        message: trimmed,
+        liveSearch: true
       });
 
       setSessionId(data.sessionId);
@@ -111,13 +119,15 @@ const AgentSearchChat = () => {
           content: data.response,
           results: data.results || [],
           followUp: data.followUp,
-          context: data.context
+          meta: data.meta,
+          searchParams: data.searchParams,
+          clarification: data.clarification
         }
       ]);
     } catch (err) {
       setError(
         err.message ||
-          'Could not reach the search agent. Is the backend running on port 3001?'
+          'Could not reach the agent. Start backend (3001) and Valkey.'
       );
       setMessages((prev) => prev.slice(0, -1));
     } finally {
@@ -151,217 +161,280 @@ const AgentSearchChat = () => {
   };
 
   return (
-    <div className='agent-search-layout'>
-      <div className='agent-chat-panel'>
-        <div className='agent-chat-header flex-between flex-wrap gap-12'>
-          <div>
-            <h5 className='mb-4 flex-align gap-8'>
+    <div className='agent-chat-panel'>
+      <div className='agent-chat-header'>
+        <div className='flex-between flex-wrap gap-8'>
+          <div className='flex-1 min-w-0'>
+            <h6 className='mb-2 flex-align gap-6 text-truncate'>
               <i className='ph ph-sparkle text-main-600' />
               AI Shopping Assistant
-            </h5>
-            <p className='text-sm text-gray-600 mb-0'>
-              Ask in plain English — I remember context across messages.
+            </h6>
+            <p className='text-xs text-gray-600 mb-0'>
+              Type your own question — we analyze it, search live, and reply.
             </p>
           </div>
-          <div className='flex-align gap-12'>
-            <span className='text-sm text-gray-600 flex-align gap-6'>
+          <div className='agent-chat-header-actions'>
+            <Link
+              to='/valkey-dashboard'
+              className='agent-header-icon-btn text-decoration-none'
+              title='Valkey live monitor'
+              target='_blank'
+              rel='noopener noreferrer'
+            >
+              <i className='ph ph-chart-line-up' />
+            </Link>
+            <span
+              className='text-xs text-gray-500 flex-align gap-4 me-2 d-none d-sm-flex'
+              title={backendOnline ? 'API online' : 'API offline'}
+            >
               <span
                 className={`agent-status-dot ${
-                  backendOnline ? 'agent-status-dot--online' : 'agent-status-dot--offline'
+                  backendOnline
+                    ? 'agent-status-dot--online'
+                    : 'agent-status-dot--offline'
                 }`}
               />
-              {backendOnline === null
-                ? 'Checking…'
-                : backendOnline
-                  ? 'Agent online'
-                  : 'Backend offline'}
             </span>
             <button
               type='button'
-              className='btn btn-outline-secondary btn-sm rounded-pill'
+              className='agent-header-icon-btn'
               onClick={startNewChat}
+              title='New chat'
+              aria-label='New chat'
             >
-              New chat
+              <i className='ph ph-arrows-clockwise' />
+            </button>
+            <button
+              type='button'
+              className='agent-header-icon-btn'
+              onClick={onToggleExpand}
+              title={isExpanded ? 'Compact view' : 'Expand chat'}
+              aria-label={isExpanded ? 'Compact view' : 'Expand chat'}
+            >
+              <i
+                className={
+                  isExpanded ? 'ph ph-arrows-in' : 'ph ph-arrows-out'
+                }
+              />
+            </button>
+            <button
+              type='button'
+              className='agent-header-icon-btn'
+              onClick={onClose}
+              title='Minimize'
+              aria-label='Minimize assistant'
+            >
+              <i className='ph ph-minus' />
             </button>
           </div>
         </div>
+      </div>
 
-        <div className='agent-chat-messages'>
-          {messages.length === 0 && !loading && (
-            <div className='agent-chat-empty'>
-              <i className='ph ph-chats-circle text-main-600 text-4xl mb-16 d-block' />
-              <h6 className='mb-8'>Try a natural language search</h6>
-              <p className='text-sm mb-0'>
-                Example: &quot;Birthday gift for my 10-year-old nephew who likes
-                science&quot;
-              </p>
-            </div>
-          )}
+      <div className='agent-chat-messages'>
+        {messages.length === 0 && !loading && (
+          <div className='agent-chat-empty'>
+            <i className='ph ph-chat-text text-main-600 text-3xl mb-12 d-block' />
+            <h6 className='mb-6 text-sm'>Ask in your own words</h6>
+            <p className='text-xs mb-0 text-gray-600'>
+              Every message runs a <strong>live search</strong> (not cached
+              results). Context is stored in Valkey for follow-ups.
+            </p>
+          </div>
+        )}
 
-          {messages.map((msg, idx) => (
-            <div
-              key={`${msg.role}-${idx}`}
-              className={`agent-message agent-message--${msg.role}`}
-            >
-              <div className='agent-message-bubble'>{msg.content}</div>
+        {messages.map((msg, idx) => (
+          <div
+            key={`${msg.role}-${idx}`}
+            className={`agent-message agent-message--${msg.role}`}
+          >
+            {msg.role === 'agent' && msg.meta && (
+              <>
+                <span
+                  className={`agent-source-badge ${
+                    msg.meta.resultSource === 'clarification'
+                      ? 'agent-source-badge--cache'
+                      : msg.meta.liveSearch
+                        ? 'agent-source-badge--live'
+                        : 'agent-source-badge--cache'
+                  }`}
+                >
+                  <i
+                    className={
+                      msg.meta.resultSource === 'clarification'
+                        ? 'ph ph-question'
+                        : msg.meta.liveSearch
+                          ? 'ph ph-lightning'
+                          : 'ph ph-database'
+                    }
+                  />
+                  {msg.meta.resultSource === 'clarification'
+                    ? 'Clarifying'
+                    : msg.meta.liveSearch
+                      ? 'Live search'
+                      : 'From Valkey cache'}
+                  {msg.meta.latencyMs != null && ` · ${msg.meta.latencyMs}ms`}
+                  {msg.meta.under3Seconds === false && ' · slow'}
+                </span>
+                {msg.meta.toolsUsed?.length > 0 && (
+                  <p className='agent-analyzed-hint mb-0'>
+                    Tools: {msg.meta.toolsUsed.join(', ')}
+                  </p>
+                )}
+                {msg.searchParams && (
+                  <p className='agent-analyzed-hint mb-0 text-truncate' title={JSON.stringify(msg.searchParams)}>
+                    Parsed: intent={msg.searchParams.intent || '—'}
+                    {msg.searchParams.context?.age
+                      ? `, age=${msg.searchParams.context.age}`
+                      : ''}
+                    {msg.searchParams.tags?.length
+                      ? `, tags=[${msg.searchParams.tags.slice(0, 3).join(',')}]`
+                      : ''}
+                  </p>
+                )}
+              </>
+            )}
 
-              {msg.role === 'agent' && msg.results?.length > 0 && (
-                <div className='agent-product-grid'>
-                  {msg.results.map((product) => (
-                    <div
-                      key={product.productId}
-                      className='agent-product-card'
-                    >
-                      <div className='flex-between flex-wrap gap-8'>
-                        <strong className='text-gray-900'>{product.name}</strong>
-                        <span className='text-main-600 fw-semibold'>
-                          {formatPrice(product.price)}
-                        </span>
-                      </div>
-                      {product.rating != null && (
-                        <div className='text-sm text-warning-600 mt-4'>
-                          <i className='ph ph-star-fill' /> {product.rating}/5
-                        </div>
-                      )}
-                      {product.reason && (
-                        <p className='agent-product-reason mb-0'>
-                          <i className='ph ph-lightbulb me-4' />
-                          {product.reason}
-                        </p>
-                      )}
-                      <div className='agent-feedback-btns'>
-                        <button
-                          type='button'
-                          className={`agent-feedback-btn ${
-                            feedbackMap[product.productId] === 'helpful'
-                              ? 'agent-feedback-btn--active'
-                              : ''
-                          }`}
-                          onClick={() =>
-                            handleFeedback(product.productId, 'helpful')
-                          }
-                        >
-                          <i className='ph ph-thumbs-up' /> Helpful
-                        </button>
-                        <button
-                          type='button'
-                          className={`agent-feedback-btn ${
-                            feedbackMap[product.productId] === 'not_helpful'
-                              ? 'agent-feedback-btn--active'
-                              : ''
-                          }`}
-                          onClick={() =>
-                            handleFeedback(product.productId, 'not_helpful')
-                          }
-                        >
-                          <i className='ph ph-thumbs-down' /> Not helpful
-                        </button>
-                      </div>
+            <div className='agent-message-bubble'>{msg.content}</div>
+
+            {msg.role === 'agent' && msg.results?.length > 0 && (
+              <div className='agent-product-grid'>
+                {msg.results.map((product) => (
+                  <div key={product.productId} className='agent-product-card'>
+                    <div className='flex-between flex-wrap gap-6'>
+                      <strong className='text-gray-900 text-sm'>
+                        {product.name}
+                      </strong>
+                      <span className='text-main-600 fw-semibold text-sm'>
+                        {formatPrice(product.price)}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {msg.role === 'agent' && msg.followUp && (
-                <p className='text-sm text-gray-600 mb-0 fst-italic'>
-                  {msg.followUp}
-                </p>
-              )}
-            </div>
-          ))}
-
-          {loading && (
-            <div className='agent-message agent-message--agent'>
-              <div className='agent-typing' aria-label='Agent is thinking'>
-                <span />
-                <span />
-                <span />
+                    {product.rating != null && (
+                      <div className='text-xs text-warning-600 mt-4'>
+                        <i className='ph ph-star-fill' /> {product.rating}/5
+                      </div>
+                    )}
+                    {product.reason && (
+                      <p className='agent-product-reason mb-0'>
+                        {product.reason}
+                      </p>
+                    )}
+                    <div className='agent-feedback-btns'>
+                      <button
+                        type='button'
+                        className={`agent-feedback-btn ${
+                          feedbackMap[product.productId] === 'helpful'
+                            ? 'agent-feedback-btn--active'
+                            : ''
+                        }`}
+                        onClick={() =>
+                          handleFeedback(product.productId, 'helpful')
+                        }
+                      >
+                        <i className='ph ph-thumbs-up' />
+                      </button>
+                      <button
+                        type='button'
+                        className={`agent-feedback-btn ${
+                          feedbackMap[product.productId] === 'not_helpful'
+                            ? 'agent-feedback-btn--active'
+                            : ''
+                        }`}
+                        onClick={() =>
+                          handleFeedback(product.productId, 'not_helpful')
+                        }
+                      >
+                        <i className='ph ph-thumbs-down' />
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
+            )}
+
+            {msg.role === 'agent' && msg.followUp && (
+              <button
+                type='button'
+                className='agent-suggestion-chip border-0'
+                disabled={loading}
+                onClick={() => sendMessage(msg.followUp)}
+              >
+                {msg.followUp}
+              </button>
+            )}
+          </div>
+        ))}
+
+        {loading && (
+          <div className='agent-message agent-message--agent'>
+            <span className='agent-source-badge agent-source-badge--live'>
+              <i className='ph ph-lightning' /> Analyzing your message…
+            </span>
+            <div className='agent-typing' aria-label='Agent is thinking'>
+              <span />
+              <span />
+              <span />
             </div>
-          )}
+          </div>
+        )}
 
-          <div ref={messagesEndRef} />
-        </div>
+        <div ref={messagesEndRef} />
+      </div>
 
-        <div className='agent-suggestions'>
-          {QUICK_PROMPTS.map((prompt) => (
+      <button
+        type='button'
+        className='agent-examples-toggle'
+        onClick={() => setShowExamples((v) => !v)}
+      >
+        {showExamples ? '▼ Hide' : '▶'} Challenge doc examples (optional)
+      </button>
+
+      {showExamples && (
+        <div className='agent-suggestions agent-suggestions--expanded'>
+          {CHALLENGE_EXAMPLES.map((prompt) => (
             <button
               key={prompt}
               type='button'
               className='agent-suggestion-chip'
               disabled={loading}
               onClick={() => sendMessage(prompt)}
+              title={prompt}
             >
-              {prompt.length > 48 ? `${prompt.slice(0, 48)}…` : prompt}
+              {prompt.length > 40 ? `${prompt.slice(0, 40)}…` : prompt}
             </button>
           ))}
         </div>
+      )}
 
-        {error && (
-          <div className='px-20 pb-8'>
-            <div className='alert alert-danger py-8 px-16 mb-0 text-sm rounded-12'>
-              <i className='ph ph-warning-circle me-4' />
-              {error}
-            </div>
+      {error && (
+        <div className='px-16 pb-8'>
+          <div className='alert alert-danger py-8 px-12 mb-0 text-xs rounded-8'>
+            <i className='ph ph-warning-circle me-4' />
+            {error}
           </div>
-        )}
+        </div>
+      )}
 
-        <form className='agent-chat-input-bar' onSubmit={handleSubmit}>
-          <div className='position-relative'>
-            <input
-              type='text'
-              className='form-control py-16 px-24 rounded-pill pe-64'
-              placeholder='Describe what you are looking for…'
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={loading}
-            />
-            <button
-              type='submit'
-              className='w-48 h-48 bg-main-600 rounded-circle flex-center text-xl text-white position-absolute top-50 translate-middle-y inset-inline-end-0 me-8 border-0'
-              disabled={loading || !input.trim()}
-              aria-label='Send message'
-            >
-              <i className='ph ph-paper-plane-tilt' />
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <aside className='agent-sidebar'>
-        <h6 className='mb-16'>How to use</h6>
-        <ol className='text-sm text-gray-600 ps-20 mb-24'>
-          <li className='mb-8'>Type or pick a sample question below the chat.</li>
-          <li className='mb-8'>
-            Refine with follow-ups like &quot;Show me cheaper options&quot;.
-          </li>
-          <li className='mb-8'>Rate results with thumbs up/down.</li>
-          <li>Start a new chat anytime to reset context.</li>
-        </ol>
-
-        <h6 className='mb-12'>Requirements</h6>
-        <ul className='text-sm text-gray-600 list-unstyled mb-24'>
-          <li className='mb-8 flex-align gap-8'>
-            <i className='ph ph-check-circle text-success-600' />
-            Backend: <code>npm start</code> (port 3001)
-          </li>
-          <li className='mb-8 flex-align gap-8'>
-            <i className='ph ph-check-circle text-success-600' />
-            Valkey/Redis with JSON module
-          </li>
-          <li className='flex-align gap-8'>
-            <i className='ph ph-check-circle text-success-600' />
-            Frontend: <code>npm start</code> (port 3000)
-          </li>
-        </ul>
-
-        {sessionId && (
-          <div className='bg-neutral-50 rounded-12 p-16'>
-            <p className='text-xs text-gray-500 mb-4'>Session ID</p>
-            <p className='text-sm text-break mb-0 font-monospace'>{sessionId}</p>
-          </div>
-        )}
-      </aside>
+      <form className='agent-chat-input-bar' onSubmit={handleSubmit}>
+        <div className='position-relative'>
+          <input
+            ref={inputRef}
+            type='text'
+            className='form-control py-12 px-20 rounded-pill pe-56 text-sm'
+            placeholder='Your message — e.g. gift for nephew who likes science'
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={loading}
+          />
+          <button
+            type='submit'
+            className='w-40 h-40 bg-main-600 rounded-circle flex-center text-lg text-white position-absolute top-50 translate-middle-y inset-inline-end-0 me-6 border-0'
+            disabled={loading || !input.trim()}
+            aria-label='Send'
+          >
+            <i className='ph ph-paper-plane-tilt' />
+          </button>
+        </div>
+      </form>
     </div>
   );
 };

@@ -189,16 +189,6 @@ const HeaderTwo = ({ category }) => {
                   <li className='common-dropdown__item nav-submenu__item'>
                     <Link
                       onClick={() => setActiveIndex(null)}
-                      to='/ai-search'
-                      className='common-dropdown__link nav-submenu__link hover-bg-neutral-100'
-                    >
-                      <i className='ph ph-sparkle me-4' />
-                      AI Search
-                    </Link>
-                  </li>
-                  <li className='common-dropdown__item nav-submenu__item'>
-                    <Link
-                      onClick={() => setActiveIndex(null)}
                       to='/product-details'
                       className='common-dropdown__link nav-submenu__link hover-bg-neutral-100'
                     >
@@ -217,16 +207,6 @@ const HeaderTwo = ({ category }) => {
                     </Link>
                   </li>
                 </ul>
-              </li>
-              <li className='nav-menu__item'>
-                <Link
-                  onClick={() => setActiveIndex(null)}
-                  to='/ai-search'
-                  className='nav-menu__link flex-align gap-6'
-                >
-                  <i className='ph ph-sparkle text-main-600' />
-                  AI Search
-                </Link>
               </li>
               <li
                 onClick={() => handleMenuClick(2)}
@@ -1774,19 +1754,6 @@ const HeaderTwo = ({ category }) => {
                       </li>
                       <li className='common-dropdown__item nav-submenu__item'>
                         <NavLink
-                          to='/ai-search'
-                          className={(navData) =>
-                            navData.isActive
-                              ? "common-dropdown__link nav-submenu__link hover-bg-neutral-100 activePage"
-                              : "common-dropdown__link nav-submenu__link hover-bg-neutral-100"
-                          }
-                        >
-                          <i className='ph ph-sparkle me-4' />
-                          AI Search
-                        </NavLink>
-                      </li>
-                      <li className='common-dropdown__item nav-submenu__item'>
-                        <NavLink
                           to='/product-details'
                           className={(navData) =>
                             navData.isActive
@@ -1812,19 +1779,6 @@ const HeaderTwo = ({ category }) => {
                         </NavLink>
                       </li>
                     </ul>
-                  </li>
-                  <li className='nav-menu__item'>
-                    <NavLink
-                      to='/ai-search'
-                      className={(navData) =>
-                        navData.isActive
-                          ? "nav-menu__link flex-align gap-6 activePage"
-                          : "nav-menu__link flex-align gap-6"
-                      }
-                    >
-                      <i className='ph ph-sparkle text-main-600' />
-                      AI Search
-                    </NavLink>
                   </li>
                   <li className='on-hover-item nav-menu__item has-submenu'>
                     <span className='badge-notification bg-warning-600 text-white text-sm py-2 px-8 rounded-4'>

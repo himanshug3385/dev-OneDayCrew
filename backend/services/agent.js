@@ -1,20 +1,26 @@
 const crypto = require('crypto');
 const valkeyService = require('./valkey');
 
+/**
+ * Challenge 14 agent — NLU, multi-step tools, Valkey conversation memory.
+ * Spec tools: search_products, filter_by_price, get_reviews, check_availability, get_similar
+ */
 class AgentService {
   constructor() {
     this.tools = {
       search_products: this.searchProducts.bind(this),
       semantic_search: this.semanticSearch.bind(this),
+      filter_by_price: this.filterByPrice.bind(this),
+      get_reviews: this.getReviews.bind(this),
       get_product_details: this.getProductDetails.bind(this),
       check_availability: this.checkAvailability.bind(this),
-      find_similar: this.findSimilarProducts.bind(this),
+      get_similar: this.getSimilarProducts.bind(this),
       ask_clarification: this.askClarification.bind(this)
     };
   }
 
   /**
-   * Parse natural language query into structured search parameters
+   * Parse natural language into structured search parameters (Challenge 14 NLU).
    */
   parseQuery(query) {
     const params = {
@@ -30,13 +36,11 @@ class AgentService {
 
     const queryLower = query.toLowerCase();
 
-    // Intent detection
     if (queryLower.includes('birthday') || queryLower.includes('gift')) {
       params.intent = 'gift_search';
       params.context.occasion = 'birthday';
     }
 
-    // Age: "10 year old", "10-year-old", "10 years"
     const ageMatch =
       query.match(/(\d+)[\s-]*(?:year|yr)s?[\s-]*old/i) ||
       query.match(/(\d+)\s*(?:year|yr)s?\s*old/i);
@@ -44,9 +48,9 @@ class AgentService {
       const age = parseInt(ageMatch[1], 10);
       params.context.age = age;
       params.context.ageGroup = this.getAgeGroup(age);
+      params.context.priceRange = params.context.priceRange || this.defaultPriceRangeForAge(age);
     }
 
-    // Extract interests/keywords
     if (queryLower.includes('science')) {
       params.tags.push('science', 'educational');
       params.categories.push('science');
@@ -70,7 +74,6 @@ class AgentService {
       params.keywords.push('chemistry');
     }
 
-    // Rating
     if (
       queryLower.includes('highly rated') ||
       queryLower.includes('top rated') ||
@@ -79,10 +82,7 @@ class AgentService {
       params.minRating = 4.5;
     }
 
-    // Price extraction (amounts in dollars → stored as cents/paise-style units)
-    const underMatch = query.match(
-      /(?:under|less than|below)\s*\$?\s*(\d+)/i
-    );
+    const underMatch = query.match(/(?:under|less than|below)\s*\$?\s*(\d+)/i);
     if (underMatch) {
       params.maxPrice = parseInt(underMatch[1], 10) * 100;
     }
@@ -93,23 +93,39 @@ class AgentService {
       params.maxPrice = parseInt(rangeMatch[2], 10) * 100;
     }
 
-    // Extract recipient info
-    if (queryLower.includes('nephew')) {
-      params.context.recipient = 'nephew';
-    } else if (queryLower.includes('niece')) {
-      params.context.recipient = 'niece';
-    } else if (queryLower.includes('son')) {
-      params.context.recipient = 'son';
-    } else if (queryLower.includes('daughter')) {
-      params.context.recipient = 'daughter';
-    }
+    if (queryLower.includes('nephew')) params.context.recipient = 'nephew';
+    else if (queryLower.includes('niece')) params.context.recipient = 'niece';
+    else if (queryLower.includes('son')) params.context.recipient = 'son';
+    else if (queryLower.includes('daughter')) params.context.recipient = 'daughter';
 
-    // Budget keywords without explicit number
     if (queryLower.includes('cheap') || queryLower.includes('affordable')) {
       params.context.budgetPreference = 'low';
     }
 
+    params.keywords = this.extractKeywordsFromUserInput(query, params);
     return params;
+  }
+
+  defaultPriceRangeForAge(age) {
+    if (age <= 8) return [500, 3000];
+    if (age <= 12) return [500, 5000];
+    return [1000, 8000];
+  }
+
+  extractKeywordsFromUserInput(query, params) {
+    const stop = new Set([
+      'i', 'me', 'my', 'a', 'an', 'the', 'for', 'to', 'and', 'or', 'is', 'are',
+      'need', 'want', 'show', 'find', 'get', 'some', 'any', 'with', 'who', 'that',
+      'this', 'what', 'how', 'can', 'you', 'please', 'like', 'good', 'best', 'only',
+      'options', 'cheaper', 'expensive', 'me', 'let'
+    ]);
+    const fromQuery = query
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !stop.has(w));
+
+    return [...new Set([...params.keywords, ...fromQuery])].slice(0, 12);
   }
 
   getAgeGroup(age) {
@@ -120,6 +136,7 @@ class AgentService {
     return '16+';
   }
 
+  /** Only true follow-ups — not "show me robotics" on a fresh search */
   isRefinementQuery(query) {
     const q = query.toLowerCase();
     return (
@@ -127,9 +144,10 @@ class AgentService {
       q.includes('lower price') ||
       q.includes('budget option') ||
       q.includes('more expensive') ||
-      q.includes('show me') ||
-      q.includes('filter') ||
-      q.includes('instead')
+      q.includes('premium') ||
+      q.includes('instead') ||
+      q.includes('filter by price') ||
+      q.includes('affordable options')
     );
   }
 
@@ -145,13 +163,8 @@ class AgentService {
         ? searchParams.categories
         : previous.categories,
       tags: searchParams.tags.length ? searchParams.tags : previous.tags,
-      keywords: searchParams.keywords.length
-        ? searchParams.keywords
-        : previous.keywords,
-      context: {
-        ...previous.context,
-        ...searchParams.context
-      }
+      keywords: previous.keywords?.length ? previous.keywords : searchParams.keywords,
+      context: { ...previous.context, ...searchParams.context }
     };
 
     if (
@@ -160,30 +173,131 @@ class AgentService {
       q.includes('budget option') ||
       q.includes('affordable')
     ) {
-      const prevMax = previous.maxPrice;
       const baseline =
-        prevMax ||
-        (conversationContext?.lastMaxResultPrice
-          ? conversationContext.lastMaxResultPrice
-          : 5000);
-      merged.maxPrice = Math.floor(baseline * 0.6);
+        previous.maxPrice ||
+        conversationContext?.lastMaxResultPrice ||
+        5000;
+      merged.maxPrice = Math.floor(baseline * 0.65);
+      merged.minPrice = null;
       merged.context.budgetPreference = 'low';
+      merged.context.refinement = 'price_lower';
     }
 
     if (q.includes('more expensive') || q.includes('premium')) {
-      const prevMin = previous.minPrice || 0;
-      merged.minPrice = Math.max(prevMin, (previous.maxPrice || 3000) + 1);
+      merged.minPrice = (previous.maxPrice || conversationContext?.lastMaxResultPrice || 2000) + 1;
       merged.maxPrice = null;
+      merged.context.refinement = 'price_higher';
     }
 
     return merged;
   }
 
+  needsClarification(query, searchParams, conversationContext) {
+    if (conversationContext?.lastSearchParams) return false;
+    if (this.isRefinementQuery(query)) return false;
+
+    const q = query.toLowerCase().trim();
+    const words = q.split(/\s+/).filter(Boolean);
+
+    const hasSignal =
+      searchParams.intent ||
+      searchParams.categories.length > 0 ||
+      searchParams.tags.length > 0 ||
+      searchParams.context.age ||
+      searchParams.maxPrice != null;
+
+    if (hasSignal) return false;
+
+    if (words.length <= 5) return true;
+
+    return false;
+  }
+
+  buildClarification(query, searchParams) {
+    if (searchParams.intent === 'gift_search' || query.toLowerCase().includes('gift')) {
+      return this.askClarification(
+        'Who is the gift for, and what are their interests or age? For example: "10-year-old nephew who likes science".',
+        [
+          'Birthday gift for a child who likes science',
+          'Gift under $50 for a teenager',
+          'Educational toy for ages 8–12'
+        ]
+      );
+    }
+    return this.askClarification(
+      'What type of product are you looking for? Mention category, budget, or who it is for.',
+      [
+        'Science kits for kids',
+        'Robotics under $50',
+        'Highly rated chemistry sets'
+      ]
+    );
+  }
+
   /**
-   * Execute agent reasoning with multi-step tool use
+   * Multi-step tool plan (Challenge 14): combine searches, filters, reviews, etc.
    */
-  async reason(query, conversationContext = null, conversationHistory = []) {
-    console.log(`🤖 Agent processing: "${query}"`);
+  planToolSequence(query, searchParams, conversationContext) {
+    const q = query.toLowerCase();
+
+    if (this.needsClarification(query, searchParams, conversationContext)) {
+      return ['ask_clarification'];
+    }
+
+    const sequence = [];
+    const useSemantic =
+      query.split(/\s+/).length > 8 &&
+      searchParams.categories.length === 0 &&
+      !this.isRefinementQuery(query);
+
+    sequence.push(useSemantic ? 'semantic_search' : 'search_products');
+
+    const needsPriceFilter =
+      searchParams.maxPrice != null ||
+      searchParams.minPrice != null ||
+      searchParams.context?.budgetPreference === 'low' ||
+      searchParams.context?.refinement?.startsWith('price') ||
+      q.includes('under') ||
+      q.includes('cheaper') ||
+      q.includes('budget');
+
+    if (needsPriceFilter) {
+      sequence.push('filter_by_price');
+    }
+
+    if (
+      q.includes('review') ||
+      q.includes('reviews') ||
+      q.includes('rated') ||
+      q.includes('feedback')
+    ) {
+      sequence.push('get_reviews');
+    }
+
+    if (
+      q.includes('availability') ||
+      q.includes('in stock') ||
+      q.includes('deliver') ||
+      q.includes('shipping')
+    ) {
+      sequence.push('check_availability');
+    }
+
+    if (
+      q.includes('similar') ||
+      q.includes('alternative') ||
+      q.includes('like this')
+    ) {
+      sequence.push('get_similar');
+    }
+
+    return sequence;
+  }
+
+  async reason(query, conversationContext = null, conversationHistory = [], opts = {}) {
+    const liveSearch = opts.liveSearch !== false;
+    const started = Date.now();
+    console.log(`🤖 Agent processing user input: "${query}"`);
 
     let searchParams = this.parseQuery(query);
 
@@ -195,92 +309,88 @@ class AgentService {
       this.isRefinementQuery(query) &&
       (conversationContext?.lastSearchParams || conversationHistory.length > 0)
     ) {
-      searchParams = this.applyRefinement(
-        query,
-        searchParams,
-        conversationContext
-      );
+      searchParams = this.applyRefinement(query, searchParams, conversationContext);
+      console.log(`🔗 Refinement applied from previous Valkey context`);
     }
 
-    console.log(`📋 Parsed params:`, searchParams);
+    console.log(`📋 Structured search params:`, JSON.stringify(searchParams, null, 2));
 
-    // Cache lookup
     const queryHash = crypto
       .createHash('md5')
       .update(JSON.stringify({ query, searchParams }))
       .digest('hex');
-    const cached = await valkeyService.getCacheResult(queryHash);
-    if (cached?.results) {
-      console.log(`⚡ Cache hit for query hash ${queryHash}`);
+
+    if (!liveSearch) {
+      const cached = await valkeyService.getCacheResult(queryHash);
+      if (cached?.results) {
+        return {
+          searchParams,
+          products: this.normalizeCachedProducts(cached.results),
+          toolsUsed: ['agent_cache'],
+          fromCache: true,
+          resultSource: 'valkey_cache',
+          queryHash,
+          latencyMs: Date.now() - started
+        };
+      }
+    }
+
+    const toolSequence = this.planToolSequence(
+      query,
+      searchParams,
+      conversationContext
+    );
+
+    if (toolSequence[0] === 'ask_clarification') {
+      const clarification = this.buildClarification(query, searchParams);
       return {
         searchParams,
-        products: cached.results,
-        toolsUsed: ['cache'],
-        fromCache: true
+        products: [],
+        clarification,
+        toolsUsed: ['ask_clarification'],
+        toolResults: { ask_clarification: clarification },
+        queryHash,
+        fromCache: false,
+        resultSource: 'clarification',
+        latencyMs: Date.now() - started
       };
     }
 
-    const toolSequence = [];
     const toolResults = {};
     let products = [];
 
-    const useSemantic =
-      searchParams.keywords.length === 0 &&
-      !searchParams.categories.length &&
-      query.split(' ').length > 4;
-
-    if (useSemantic) {
-      toolSequence.push('semantic_search');
-    } else {
-      toolSequence.push('search_products');
-    }
-
-    if (
-      query.toLowerCase().includes('details') ||
-      query.toLowerCase().includes('review') ||
-      query.toLowerCase().includes('tell me more')
-    ) {
-      toolSequence.push('get_product_details');
-    }
-
-    if (
-      query.toLowerCase().includes('availability') ||
-      query.toLowerCase().includes('in stock') ||
-      query.toLowerCase().includes('deliver')
-    ) {
-      toolSequence.push('check_availability');
-    }
-
-    if (
-      query.toLowerCase().includes('similar') ||
-      query.toLowerCase().includes('alternative') ||
-      query.toLowerCase().includes('like this')
-    ) {
-      toolSequence.push('find_similar');
-    }
-
     for (const tool of toolSequence) {
-      const toolResult = await this.tools[tool](searchParams, query);
-      toolResults[tool] = toolResult;
+      let toolResult;
 
-      if (tool === 'search_products' || tool === 'semantic_search') {
+      if (tool === 'filter_by_price') {
+        toolResult = await this.filterByPrice(searchParams, products, query);
         products = toolResult;
-      } else if (tool === 'find_similar' && toolResult.length > 0) {
-        products = toolResult;
-      } else if (
-        (tool === 'check_availability' || tool === 'get_product_details') &&
-        toolResult.length > 0
-      ) {
-        products = toolResult;
+      } else if (tool === 'get_reviews') {
+        toolResult = await this.getReviews(searchParams, products, query);
+        products = toolResult.length ? toolResult : products;
+      } else if (tool === 'check_availability') {
+        toolResult = await this.checkAvailability(searchParams, products, query);
+        products = toolResult.length ? toolResult : products;
+      } else if (tool === 'get_similar') {
+        toolResult = await this.getSimilarProducts(searchParams, products, query);
+        products = toolResult.length ? toolResult : products;
+      } else {
+        toolResult = await this.tools[tool](searchParams, query);
+        if (
+          tool === 'search_products' ||
+          tool === 'semantic_search'
+        ) {
+          products = toolResult;
+        }
       }
 
+      toolResults[tool] = toolResult;
       console.log(
-        `✅ Tool "${tool}" executed, found ${Array.isArray(toolResult) ? toolResult.length : 1} result(s)`
+        `✅ Tool "${tool}" → ${Array.isArray(toolResult) ? toolResult.length : 1} result(s)`
       );
     }
 
-    // Sort by price for budget refinements
-    if (searchParams.context.budgetPreference === 'low') {
+    if (searchParams.context?.budgetPreference === 'low') {
       products = [...products].sort((a, b) => a.price - b.price);
     }
 
@@ -289,24 +399,37 @@ class AgentService {
       products,
       toolResults,
       toolsUsed: toolSequence,
-      queryHash
+      queryHash,
+      fromCache: false,
+      resultSource: 'live_search',
+      latencyMs: Date.now() - started
     };
   }
 
-  /**
-   * Tool implementations
-   */
-  async searchProducts(params) {
-    const products = await valkeyService.searchProducts(
-      params.keywords.join(' '),
-      {
-        minPrice: params.minPrice,
-        maxPrice: params.maxPrice,
-        minRating: params.minRating,
-        categories: params.categories,
-        tags: params.tags
-      }
-    );
+  normalizeCachedProducts(results) {
+    return results.map((r) => ({
+      id: r.productId || r.id,
+      name: r.name,
+      price: r.price,
+      rating: r.rating,
+      reason: r.reason,
+      tags: r.tags || []
+    }));
+  }
+
+  async searchProducts(params, naturalLanguageQuery = '') {
+    const isRefinement = params.context?.refinement;
+    const searchText = isRefinement
+      ? ''
+      : naturalLanguageQuery.trim() || params.keywords.join(' ') || '';
+
+    const products = await valkeyService.searchProducts(searchText, {
+      minPrice: params.minPrice,
+      maxPrice: params.maxPrice,
+      minRating: params.minRating,
+      categories: params.categories,
+      tags: params.tags
+    });
 
     return products.map((p) => ({
       ...p,
@@ -319,30 +442,65 @@ class AgentService {
       naturalLanguageQuery || params.keywords.join(' '),
       10
     );
-
     return products.map((p) => ({
       ...p,
       reason: this.generateReason(p, params)
     }));
   }
 
-  async getProductDetails(params) {
-    const results = await this.searchProducts(params);
+  async filterByPrice(params, existingProducts = [], naturalLanguageQuery = '') {
+    let products = existingProducts?.length
+      ? existingProducts
+      : await this.searchProducts(params, naturalLanguageQuery);
 
-    if (results.length === 0) return [];
+    if (params.maxPrice != null) {
+      products = products.filter((p) => p.price <= params.maxPrice);
+    }
+    if (params.minPrice != null) {
+      products = products.filter((p) => p.price >= params.minPrice);
+    }
 
-    const topProduct = results[0];
-    const details = await valkeyService.getProductDetails(topProduct.id);
-
-    return details
-      ? [{ ...details, reason: topProduct.reason }]
-      : [results[0]];
+    return products.map((p) => ({
+      ...p,
+      reason: `${p.reason} • Price ₹${p.price} fits your ${
+        params.maxPrice != null ? `budget (max ₹${params.maxPrice})` : 'criteria'
+      }`
+    }));
   }
 
-  async checkAvailability(params) {
-    const results = await this.searchProducts(params);
+  async getReviews(params, existingProducts = [], naturalLanguageQuery = '') {
+    const base = existingProducts?.length
+      ? existingProducts
+      : await this.searchProducts(params, naturalLanguageQuery);
 
-    if (results.length === 0) return [];
+    const enriched = [];
+    for (const p of base.slice(0, 5)) {
+      const details = await valkeyService.getProductDetails(p.id);
+      const topReview = details?.reviews_list?.[0];
+      const reviewText = topReview
+        ? `"${topReview.text}" — ${topReview.author} (${topReview.rating}/5)`
+        : `${p.reviews || 0} customer reviews`;
+      enriched.push({
+        ...p,
+        reason: `${p.reason} • ${reviewText}`
+      });
+    }
+    return enriched;
+  }
+
+  async getProductDetails(params) {
+    const results = await this.searchProducts(params);
+    if (!results.length) return [];
+    const details = await valkeyService.getProductDetails(results[0].id);
+    return details ? [{ ...details, reason: results[0].reason }] : [results[0]];
+  }
+
+  async checkAvailability(params, existingProducts = [], naturalLanguageQuery = '') {
+    const results = existingProducts?.length
+      ? existingProducts
+      : await this.searchProducts(params, naturalLanguageQuery);
+
+    if (!results.length) return [];
 
     const availabilityData = await Promise.all(
       results.slice(0, 5).map((p) => valkeyService.checkAvailability(p.id))
@@ -351,75 +509,83 @@ class AgentService {
     return results.slice(0, 5).map((p, i) => ({
       ...p,
       availability: availabilityData[i],
-      reason: `${p.reason} • In stock: ${availabilityData[i].inStock ? 'Yes' : 'No'}`
+      reason: `${p.reason} • In stock: ${availabilityData[i].inStock ? 'Yes' : 'No'}, delivers in ~${availabilityData[i].deliveryDays} day(s)`
     }));
   }
 
-  async findSimilarProducts(params) {
-    const results = await this.searchProducts(params);
+  async getSimilarProducts(params, existingProducts = [], naturalLanguageQuery = '') {
+    const results = existingProducts?.length
+      ? existingProducts
+      : await this.searchProducts(params, naturalLanguageQuery);
 
-    if (results.length === 0) return [];
+    if (!results.length) return [];
 
-    const topProduct = results[0];
-    const similar = await valkeyService.findSimilarProducts(topProduct.id, 5);
-
+    const similar = await valkeyService.findSimilarProducts(results[0].id, 5);
     return similar.map((p) => ({
       ...p,
-      reason: `Similar to ${topProduct.name}`
+      reason: this.generateReason(p, params) + ` • Similar to ${results[0].name}`
     }));
   }
 
   askClarification(question, options = []) {
-    return {
-      type: 'clarification',
-      question,
-      options
-    };
+    return { type: 'clarification', question, options };
   }
 
   generateReason(product, searchParams) {
     const reasons = [];
 
     if (searchParams.context?.ageGroup) {
-      reasons.push(`Designed for ages ${searchParams.context.ageGroup}`);
+      reasons.push(`Suitable for ages ${searchParams.context.ageGroup}`);
     }
-
     if (searchParams.tags?.length > 0) {
       const matchingTags = searchParams.tags.filter((t) =>
-        product.tags.includes(t)
+        product.tags?.includes(t)
       );
       if (matchingTags.length > 0) {
-        reasons.push(`Matches: ${matchingTags.join(', ')}`);
+        reasons.push(`Matches interests: ${matchingTags.join(', ')}`);
       }
     }
-
     if (product.rating >= 4.5) {
       reasons.push(
         `Highly rated (${product.rating}/5, ${product.reviews} reviews)`
       );
     }
-
     if (searchParams.context?.recipient) {
-      reasons.push(`Great for your ${searchParams.context.recipient}`);
+      reasons.push(`Great gift for your ${searchParams.context.recipient}`);
     }
-
     if (searchParams.context?.occasion === 'birthday') {
       reasons.push('Ideal birthday gift');
     }
-
     if (searchParams.context?.budgetPreference === 'low') {
-      reasons.push('Budget-friendly option from your previous search');
+      reasons.push('More affordable vs. your previous results');
+    }
+    if (searchParams.intent === 'gift_search') {
+      reasons.push('Fits your gift search');
     }
 
     return reasons.length > 0
       ? reasons.join(' • ')
-      : 'Recommended based on your search criteria';
+      : 'Recommended based on your query';
   }
 
   async generateResponse(query, agentResult, conversationTurns = []) {
-    const { products, searchParams, toolsUsed } = agentResult;
+    const { products, searchParams, toolsUsed, clarification } = agentResult;
 
-    if (!products || products.length === 0) {
+    if (clarification) {
+      return {
+        response: clarification.question,
+        results: [],
+        followUp: clarification.options?.join(' | ') || null,
+        clarification,
+        context: {
+          intent: searchParams.intent,
+          refinements_available: false,
+          toolsUsed
+        }
+      };
+    }
+
+    if (!products?.length) {
       return {
         response: `I couldn't find products matching "${query}". Could you share a budget or specific interests?`,
         results: [],
@@ -427,16 +593,14 @@ class AgentService {
           'For example: chemistry kits, astronomy, or robotics — and a price range?',
         context: {
           intent: searchParams.intent,
-          refinements_available: false
+          refinements_available: false,
+          toolsUsed
         }
       };
     }
 
-    const responseText = this.buildResponseText(query, products, searchParams);
-    const followUp = this.generateFollowUp(searchParams, conversationTurns.length);
-
     return {
-      response: responseText,
+      response: this.buildResponseText(query, products, searchParams),
       results: products.slice(0, 5).map((r) => ({
         productId: r.id,
         name: r.name,
@@ -444,65 +608,61 @@ class AgentService {
         rating: r.rating,
         reason: r.reason
       })),
-      followUp,
+      followUp: this.generateFollowUp(searchParams, conversationTurns.length),
       context: {
         intent: searchParams.intent,
         refinements_available: true,
         toolsUsed,
         recipient: searchParams.context?.recipient,
         age: searchParams.context?.age,
-        interests: searchParams.tags
+        interests: searchParams.tags,
+        priceRange: searchParams.maxPrice
+          ? [searchParams.minPrice || 0, searchParams.maxPrice]
+          : searchParams.context?.priceRange
       }
     };
   }
 
   buildResponseText(query, results, searchParams) {
+    if (searchParams.context?.refinement === 'price_lower') {
+      return `Here are cheaper options (under ₹${searchParams.maxPrice}) from your previous science gift search:`;
+    }
     if (searchParams.context?.occasion === 'birthday') {
       const agePart = searchParams.context.ageGroup
         ? `${searchParams.context.ageGroup} `
         : '';
       const recipient = searchParams.context.recipient || 'recipient';
-      return `Here are some great ${agePart}science gift options for your ${recipient}'s birthday! I focused on educational and engaging products:`;
+      return `Here are great ${agePart}science gift options for your ${recipient}'s birthday:`;
     }
-
     if (searchParams.context?.budgetPreference === 'low') {
       return 'Here are more affordable options based on your previous search:';
     }
-
     if (searchParams.categories.length > 0) {
-      return `Here are the best ${searchParams.categories.join(' and ')} products for your needs:`;
+      return `Here are the best ${searchParams.categories.join(' & ')} picks for your request:`;
     }
-
-    return 'Here are the products I found for you:';
+    return 'Here are products that match what you asked for:';
   }
 
   generateFollowUp(searchParams, turnCount = 0) {
-    const followUps = [
-      'Would you like me to filter by a specific budget, or focus on chemistry, astronomy, or robotics?',
-      'Should I show cheaper or premium alternatives?',
-      'Would you like to see similar products or check delivery availability?',
-      'Want me to narrow results by rating or brand?'
+    const options = [
+      'Would you like me to filter by budget, or focus on chemistry, astronomy, or robotics?',
+      'Should I show cheaper alternatives or check reviews?',
+      'Want similar products or delivery availability?'
     ];
-
     if (searchParams.context?.budgetPreference === 'low') {
-      return 'Would you like even lower-priced options, or products in a specific science area?';
+      return 'Need even lower prices, or a specific science topic?';
     }
-
-    return followUps[turnCount % followUps.length];
+    return options[turnCount % options.length];
   }
 
   mergeContext(currentParams, conversationHistory) {
-    if (!conversationHistory || conversationHistory.length === 0) {
-      return currentParams;
-    }
+    if (!conversationHistory?.length) return currentParams;
 
     const lastAgentTurn = [...conversationHistory]
       .reverse()
-      .find((turn) => turn.role === 'agent' && turn.searchParams);
+      .find((t) => t.role === 'agent' && t.searchParams);
 
-    if (!lastAgentTurn) {
-      return currentParams;
-    }
+    if (!lastAgentTurn) return currentParams;
 
     return {
       ...lastAgentTurn.searchParams,
@@ -513,6 +673,9 @@ class AgentService {
       tags: currentParams.tags.length
         ? currentParams.tags
         : lastAgentTurn.searchParams.tags,
+      keywords: currentParams.keywords.length
+        ? currentParams.keywords
+        : lastAgentTurn.searchParams.keywords,
       context: {
         ...lastAgentTurn.searchParams.context,
         ...currentParams.context

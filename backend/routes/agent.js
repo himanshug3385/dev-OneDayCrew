@@ -6,16 +6,17 @@ const router = express.Router();
 const valkeyService = require('../services/valkey');
 const agentService = require('../services/agent');
 
-async function processAgentSearch({ sessionId, userId, message }, res) {
+async function processAgentSearch({ sessionId, userId, message, liveSearch = true }, res) {
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
   }
 
+  const started = Date.now();
   const currentSessionId = sessionId || `sess_${uuidv4()}`;
   const currentUserId = userId || `user_${uuidv4()}`;
 
-  console.log(`\n🔍 New search query from ${currentSessionId}`);
-  console.log(`📝 Query: "${message}"`);
+  console.log(`\n🔍 User message → agent (${currentSessionId})`);
+  console.log(`📝 "${message}"`);
 
   let conversation = await valkeyService.getConversation(currentSessionId);
 
@@ -48,8 +49,13 @@ async function processAgentSearch({ sessionId, userId, message }, res) {
   const agentResult = await agentService.reason(
     message,
     conversation.context,
-    conversationHistory
+    conversationHistory,
+    { liveSearch: liveSearch !== false }
   );
+
+  if (agentResult.latencyMs > 3000) {
+    console.warn(`⚠️ Agent pipeline ${agentResult.latencyMs}ms exceeds 3s target`);
+  }
 
   const response = await agentService.generateResponse(
     message,
@@ -81,16 +87,22 @@ async function processAgentSearch({ sessionId, userId, message }, res) {
 
   await valkeyService.setConversation(currentSessionId, conversation);
 
-  if (agentResult.queryHash && !agentResult.fromCache) {
-    await valkeyService.setCacheResult(
-      agentResult.queryHash,
-      { results: response.results },
-      300
-    );
+  // Background cache write for dashboard visibility only — never read during live chat
+  if (agentResult.queryHash && agentResult.resultSource === 'live_search') {
+    valkeyService
+      .setCacheResult(
+        agentResult.queryHash,
+        { results: response.results, message, cachedAt: new Date().toISOString() },
+        300
+      )
+      .catch(() => {});
   }
 
+  const latencyMs = Date.now() - started;
+  const resultSource = agentResult.resultSource || 'live_search';
+
   console.log(
-    `✅ Agent response generated with ${response.results.length} products`
+    `✅ ${resultSource} → ${response.results.length} products (${latencyMs}ms)`
   );
 
   return res.json({
@@ -99,8 +111,26 @@ async function processAgentSearch({ sessionId, userId, message }, res) {
     response: response.response,
     results: response.results,
     followUp: response.followUp,
+    clarification: response.clarification || null,
     context: response.context,
-    turnCount: conversation.turns.length
+    turnCount: conversation.turns.length,
+    searchParams: agentResult.searchParams,
+    meta: {
+      resultSource,
+      liveSearch: resultSource === 'live_search',
+      valkeyUsed: true,
+      analyzedUserInput: message,
+      searchParams: agentResult.searchParams,
+      toolsUsed: agentResult.toolsUsed,
+      latencyMs: agentResult.latencyMs || latencyMs,
+      under3Seconds: (agentResult.latencyMs || latencyMs) < 3000,
+      valkeyKeys: {
+        conversation: `conversation:${currentSessionId}`,
+        cache: agentResult.queryHash
+          ? `agent_cache:${agentResult.queryHash}`
+          : null
+      }
+    }
   });
 }
 
@@ -176,6 +206,7 @@ router.post('/feedback', async (req, res) => {
 
     await valkeyService.client.json.set(feedbackKey, '$', feedbackData);
     await valkeyService.client.expire(feedbackKey, 2592000);
+    await valkeyService.track('FEEDBACK_SET', feedbackKey, { success: true });
 
     console.log(`📊 Feedback recorded: ${productId} - ${feedback}`);
 

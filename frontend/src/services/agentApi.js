@@ -16,10 +16,10 @@ async function request(path, options = {}) {
   return data;
 }
 
-export function searchAgent({ sessionId, userId, message }) {
+export function searchAgent({ sessionId, userId, message, liveSearch = true }) {
   return request('/api/agent/search', {
     method: 'POST',
-    body: JSON.stringify({ sessionId, userId, message })
+    body: JSON.stringify({ sessionId, userId, message, liveSearch })
   });
 }
 
